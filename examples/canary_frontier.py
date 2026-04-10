@@ -22,7 +22,7 @@ from mlx.optimizers import Adam
 from mlx_private import DPOptimizer, make_private_loss
 from mlx_private._patch import ensure_attention_backend_for_per_sample_grads
 
-MODEL_NAME = "Qwen/Qwen2.5-0.5B-Instruct"
+DEFAULT_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
 SEQ_LEN = 64
 BATCH_SIZE = 4
 EPOCHS = 5
@@ -75,11 +75,11 @@ def tokenize_corpus(tokenizer, texts, seq_len):
 
 # ---- model ----------------------------------------------------------------
 
-def build_model(patch_attention=False):
+def build_model(model_name=DEFAULT_MODEL, patch_attention=False):
     from mlx_lm import load
     from mlx_lm.tuner.utils import linear_to_lora_layers
 
-    model, tokenizer = load(MODEL_NAME)
+    model, tokenizer = load(model_name)
     model.freeze()
     linear_to_lora_layers(
         model, num_layers=4,
@@ -105,7 +105,7 @@ def per_sample_loss(model, x, y):
 
 # ---- training ------------------------------------------------------------
 
-def train_adapter(setting_name, train_x, train_y, *, seed=SEED, epochs=EPOCHS):
+def train_adapter(setting_name, train_x, train_y, *, seed=SEED, epochs=EPOCHS, model_name=DEFAULT_MODEL):
     cfg = SETTINGS[setting_name]
     sigma = cfg["noise_multiplier"]
     clip = cfg["l2_norm_clip"]
@@ -114,7 +114,7 @@ def train_adapter(setting_name, train_x, train_y, *, seed=SEED, epochs=EPOCHS):
 
     mx.random.seed(seed)
     np.random.seed(seed)
-    model, tokenizer = build_model(patch_attention=is_dp)
+    model, tokenizer = build_model(model_name=model_name, patch_attention=is_dp)
 
     if is_dp:
         ps_fn = make_private_loss(
@@ -230,6 +230,12 @@ def compute_mia_metrics(member_losses, nonmember_losses):
         for i in range(len(fpr_list) - 1)
     )
 
+    # TPR at FPR = 0.01
+    tpr_at_fpr_001 = 0.0
+    for i in range(len(fpr_list)):
+        if fpr_list[i] <= 0.01:
+            tpr_at_fpr_001 = tpr_list[i]
+
     # Best balanced accuracy
     thresholds = np.unique(scores)
     best_bal = 0.0
@@ -242,6 +248,7 @@ def compute_mia_metrics(member_losses, nonmember_losses):
     return {
         "roc_auc": round(float(auc), 4),
         "balanced_accuracy": round(float(best_bal), 4),
+        "tpr@fpr=0.01": round(float(tpr_at_fpr_001), 4),
         "member_loss_mean": round(float(np.mean(member_losses)), 4),
         "nonmember_loss_mean": round(float(np.mean(nonmember_losses)), 4),
     }
@@ -251,16 +258,18 @@ def compute_mia_metrics(member_losses, nonmember_losses):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, default=DEFAULT_MODEL)
     parser.add_argument("--epochs", type=int, default=EPOCHS)
     parser.add_argument("--seed", type=int, default=SEED)
     parser.add_argument("--n-canaries", type=int, default=N_CANARIES)
     args = parser.parse_args()
 
+    model_name = args.model
     epochs = args.epochs
     seed = args.seed
     n_canaries = args.n_canaries
 
-    print("Canary Corpus MIA Frontier")
+    print(f"Canary Corpus MIA Frontier — {model_name}")
     print("=" * 60)
 
     corpus = generate_canary_corpus(n_canaries, seed)
@@ -273,7 +282,7 @@ def main():
     nonmember_ids = sorted(indices[mid:].tolist())
     print(f"Split: {len(member_ids)} members, {len(nonmember_ids)} nonmembers")
 
-    model, tokenizer = build_model()
+    model, tokenizer = build_model(model_name=model_name)
     all_x, all_y = tokenize_corpus(tokenizer, corpus, SEQ_LEN)
     train_x = all_x[mx.array(member_ids)]
     train_y = all_y[mx.array(member_ids)]
@@ -289,6 +298,7 @@ def main():
 
         model, meta = train_adapter(
             setting, train_x, train_y, seed=seed, epochs=epochs,
+            model_name=model_name,
         )
 
         all_losses = score_losses(model, all_x, all_y)
@@ -298,7 +308,7 @@ def main():
         meta.update(mia)
 
         eps_str = f"ε={meta['epsilon']:.2f}" if meta["epsilon"] else "ε=∞"
-        print(f"  {eps_str}  AUC={mia['roc_auc']}  bal_acc={mia['balanced_accuracy']}")
+        print(f"  {eps_str}  AUC={mia['roc_auc']}  bal_acc={mia['balanced_accuracy']}  TPR@1%={mia['tpr@fpr=0.01']}")
 
         results.append(meta)
         del model
@@ -307,7 +317,7 @@ def main():
     print(f"\n{'=' * 60}")
     print("  Canary MIA Frontier")
     print(f"{'=' * 60}")
-    hdr = f"{'Setting':<12} {'ε':>8} {'ROC-AUC':>9} {'Bal.Acc':>9} {'Mem.Loss':>9} {'NM.Loss':>9}"
+    hdr = f"{'Setting':<12} {'ε':>8} {'ROC-AUC':>9} {'Bal.Acc':>9} {'TPR@1%':>8} {'Mem.Loss':>9} {'NM.Loss':>9}"
     print(hdr)
     print("-" * len(hdr))
     for r in results:
@@ -315,6 +325,7 @@ def main():
         print(
             f"{r['setting']:<12} {eps:>8} {r['roc_auc']:>9.4f}"
             f" {r['balanced_accuracy']:>9.4f}"
+            f" {r['tpr@fpr=0.01']:>8.4f}"
             f" {r['member_loss_mean']:>9.4f} {r['nonmember_loss_mean']:>9.4f}"
         )
 

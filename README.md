@@ -36,6 +36,20 @@ Without DP, the attacker identifies training examples at AUC 0.79. With DP, the 
 
 Canary ablation confirms the attack detects genuine memorization, not template recognition: unseen canaries (novel codes, same template) have loss 0.857 ± 0.075, clustering with nonmembers (0.786) not members (0.696).
 
+#### Llama-3.2-1B Confirmation
+
+Repeating the canary experiment on Llama-3.2-1B-Instruct. Mean ± std over 3 seeds.
+
+| Setting | ε (measured) | ROC-AUC | Bal. Accuracy | TPR @ 1% FPR |
+|---|---|---|---|---|
+| No DP | ∞ | **0.935 ± 0.002** | **0.861 ± 0.008** | **0.525 ± 0.101** |
+| DP (σ=0.5) | 15.43 | 0.500 ± 0.040 | 0.528 ± 0.019 | 0.018 ± 0.012 |
+| DP (σ=1.5) | 1.08 | 0.495 ± 0.045 | 0.533 ± 0.023 | 0.017 ± 0.009 |
+
+The larger model memorizes more aggressively (AUC 0.935 vs Qwen's 0.790), with TPR@1%FPR jumping from 0.157 to 0.525 — a 3x increase in the high-confidence attack regime. DP collapses the attack to chance under both noise settings.
+
+Reproduce: `python3 examples/canary_frontier.py --model mlx-community/Llama-3.2-1B-Instruct-bf16`
+
 ### Real-Data Validation (PubMedQA)
 
 To confirm leakage isn't an artifact of planted canaries, we repeated the MIA on PubMedQA — 500 real medical QA examples. The LoRA fine-tune does not learn the classification task at this scale (accuracy ≈ majority baseline), yet the model still leaks training-text membership:
@@ -85,7 +99,7 @@ The RDP accountant assumes **Poisson subsampling** (each example included indepe
 
 2. For GQA models, the fused SDPA kernel is replaced with decomposed attention. MLX 0.31.1's `mx.fast.scaled_dot_product_attention` hangs or crashes under `vmap` when query and key/value head counts differ ([ml-explore/mlx#3383](https://github.com/ml-explore/mlx/issues/3383)). The fallback is selective: only GQA modules are patched, MHA stays on the fused path. ~1.45x attention overhead.
 
-3. `DPOptimizer.step()` clips each sample's gradient to L2 norm C, sums, adds N(0, σ²C²) noise, averages, and delegates to the base optimizer. The RDP accountant tracks ε automatically.
+3. `DPOptimizer.step()` clips each sample's gradient to L2 norm C, sums, adds N(0, σ²C²) noise, averages, and delegates to the base optimizer. The RDP accountant tracks ε automatically. When `compile=True` (the default), `mx.random.state` is captured as mutable compile state so Gaussian noise is resampled on every step — verified by a fast regression test (`test_compile_randomness.py`).
 
 ## API
 
