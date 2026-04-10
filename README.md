@@ -62,8 +62,27 @@ To confirm leakage isn't an artifact of planted canaries, we repeated the MIA on
 
 Non-DP AUC range is across 2 seeds. DP collapses the attack to chance on real text just as on canaries. The key finding: **leakage and utility are decoupled** — a fine-tune that fails to generalize still leaks training membership at AUC 0.80, and DP closes that leak.
 
+### IMDB Sentiment Classification
+
+IMDB tests the case where the model actually learns. Qwen2.5-0.5B with LoRA (rank 16, all 7 linear keys) fine-tuned on 1500 IMDB reviews with full-sequence loss, forced-choice "Yes"/"No" evaluation. Mean ± std over 3 seeds.
+
+| Setting | ε (measured) | Accuracy | ROC-AUC | TPR @ 1% FPR |
+|---|---|---|---|---|
+| No DP | ∞ | **91.1 ± 0.5%** | **0.920 ± 0.006** | **0.154 ± 0.038** |
+| DP (σ=0.5) | 6.06 | 70.3 ± 14.7% | 0.499 ± 0.007 | 0.014 ± 0.006 |
+| DP (σ=1.5) | 0.31 | 60.2 ± 9.9% | 0.498 ± 0.007 | 0.011 ± 0.001 |
+
+Non-DP learns IMDB at 91% accuracy (vs 76% zero-shot) and memorizes at AUC 0.92. DP eliminates memorization completely — AUC collapses to 0.50 across all 6 DP runs (consistent with the MIA plateau observed by [Du et al. 2025](https://arxiv.org/abs/2504.21036), who found that even high ε substantially reduces MIA risk for LoRA). **DP accuracy is unreliable at this configuration**: per-seed DP-mid accuracy ranges from 53% to 89%. The privacy mechanism is robust; utility under DP at batch size 2 is not. The root cause is low per-step SNR — DP noise at σ=0.5 dominates gradient signal at B=2. Larger effective batch sizes via microbatched clipping are expected to fix this. See [Limitations](#limitations).
+
+Reproduce: `python3 examples/imdb_dp.py [--seed 42]`
 Reproduce: `python3 examples/canary_frontier.py` (canary) or `python3 examples/pubmedqa_dp.py` (PubMedQA).
 Multi-seed canary: `cd experiments/mia && python multi_seed.py --seeds 5`
+
+## Limitations
+
+- **DP utility at small batch size is high-variance.** IMDB DP accuracy ranges from 53% to 89% across seeds at batch size 2. Full-sequence loss (tested) did not resolve the variance; the root cause is low per-step SNR at B=2. Larger effective batch sizes via `clip_and_aggregate_microbatched` (already in the library, not yet wired into the training loop) are expected to fix this by improving SNR proportional to batch size. Pending v0.2.
+- Quantized base models are not supported (`QuantizedMatmul::vmap` is NYI in MLX).
+- Privacy accounting assumes Poisson subsampling; actual fixed-size sampling is slightly weaker (see [Privacy Accounting Caveat](#privacy-accounting-caveat)).
 
 ## Install
 
