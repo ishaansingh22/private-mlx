@@ -1,8 +1,6 @@
 # mlx-private
 
-MLX-native DP-SGD for private LoRA fine-tuning on Apple Silicon.
-
-Train a model on your data with per-sample DP-SGD, entirely on-device. No cloud, no data leaves your machine.
+Per-sample DP-SGD for LoRA fine-tuning on Apple Silicon. All training runs on-device via MLX.
 
 ```python
 from mlx_private import make_private_loss, DPOptimizer
@@ -20,69 +18,74 @@ for batch_x, batch_y in dataloader:
 print(f"ε = {optimizer.epsilon:.2f}")
 ```
 
-## Does DP Actually Work? Membership Inference Results
+## Membership Inference Results
 
-We trained Qwen2.5-0.5B LoRA adapters on a canary corpus (200 training examples with unique identifiers), then ran a loss-threshold membership inference attack. All numbers are mean ± std over 5 random seeds.
+Trained Qwen2.5-0.5B LoRA adapters across four benchmarks and ran loss-threshold membership inference attacks against each. The question throughout: can an attacker distinguish training examples from held-out examples by their loss?
 
-| Setting | ε (measured) | ROC-AUC | Bal. Accuracy | TPR @ 1% FPR |
+### Canary Frontier
+
+Synthetic corpus, 200 training examples with unique 8-character codes. Seed 42.
+
+| Setting | ε | ROC-AUC | Bal. Accuracy | TPR @ 1% FPR |
 |---|---|---|---|---|
-| No DP | ∞ | **0.790 ± 0.024** | **0.727 ± 0.029** | **0.157 ± 0.075** |
-| DP (σ=0.5) | 15.43 | 0.493 ± 0.006 | 0.519 ± 0.005 | 0.034 ± 0.006 |
-| DP (σ=1.5) | 1.08 | 0.493 ± 0.015 | 0.523 ± 0.010 | 0.024 ± 0.016 |
+| No DP | ∞ | **0.917** | **0.843** | **0.545** |
+| DP (σ=0.5) | 15.43 | 0.507 | 0.525 | 0.005 |
+| DP (σ=1.5) | 1.08 | 0.514 | 0.535 | 0.010 |
 
-Without DP, the attacker identifies training examples at AUC 0.79. With DP, the attack collapses to chance — even at the weaker ε=15.43 setting.
+Without DP, the attacker identifies training examples at AUC 0.917. With DP, the attack falls to chance at both noise levels.
 
-**The non-DP model does not produce verbatim completions of training data** (0/20 canaries extractable via greedy decoding, tested with tokenization-correct prefixes). Yet loss-based MIA still detects membership at 79% AUC. Teacher-forced next-token accuracy reaches 97.4%, confirming the memorization is real — it exists in the loss distribution but isn't surfaceable through autoregressive generation. This is consistent with the literature: loss-based attacks are more sensitive than extraction attacks, and it's why DP matters even for models that don't appear to leak in casual interaction.
+`python3 examples/canary_frontier.py`
 
-Canary ablation confirms the attack detects genuine memorization, not template recognition: unseen canaries (novel codes, same template) have loss 0.857 ± 0.075, clustering with nonmembers (0.786) not members (0.696).
+### SST-2
 
-#### Llama-3.2-1B Confirmation
+Binary sentiment, forced-choice Yes/No, label-only loss mask. 2000 train / 800 test, balanced. 5 seeds.
 
-Repeating the canary experiment on Llama-3.2-1B-Instruct. Mean ± std over 3 seeds.
+| Setting | ε | Accuracy | MIA AUC |
+|---|---|---|---|
+| No DP | ∞ | **87.4 ± 0.9%** | 0.661 |
+| DP (σ=0.5) | 8.76 | **82.5 ± 2.1%** | 0.507 |
 
-| Setting | ε (measured) | ROC-AUC | Bal. Accuracy | TPR @ 1% FPR |
+Utility gap: 5.0pp ± 2.8pp (range 0.5–7.9pp across seeds). The per-seed variance is large — DP noise dominates the gap at this training budget. MIA AUC is near 0.50 on every seed.
+
+`python3 examples/sst2_dp.py --seed 42 --epochs 2 --logical-batch-size 16 --microbatch-size 4 --n-train 2000 --n-test 800`
+
+### IMDB
+
+Longer reviews, label-only mask, microbatched DP updates. 1500 train / 1500 test. 3 seeds.
+
+| Setting | ε | Accuracy | MIA AUC | Member Loss | NM Loss |
+|---|---|---|---|---|---|
+| No DP | ∞ | **78.0 ± 0.8%** | 0.926 | 0.025 | 0.811 |
+| DP (σ=0.5) | 9.72 | **77.3 ± 1.7%** | 0.500 | 0.859 | 0.838 |
+
+The non-DP model has 32x lower loss on members than nonmembers. This is memorization of the training set, detectable at AUC 0.926, even though accuracy looks normal. DP eliminates the gap entirely. On one seed, DP outperforms non-DP — the noise regularizes against overfitting at 5 epochs.
+
+`python3 examples/imdb_dp.py --seed 42 --epochs 5`
+
+### PubMedQA
+
+500 real medical QA examples. The fine-tune does not learn the task at this scale — accuracy sits at the majority baseline. This benchmark tests whether DP prevents membership leakage when the model fails to generalize.
+
+| Setting | ε | MIA AUC | Member Loss | NM Loss |
 |---|---|---|---|---|
-| No DP | ∞ | **0.935 ± 0.002** | **0.861 ± 0.008** | **0.525 ± 0.101** |
-| DP (σ=0.5) | 15.43 | 0.500 ± 0.040 | 0.528 ± 0.019 | 0.018 ± 0.012 |
-| DP (σ=1.5) | 1.08 | 0.495 ± 0.045 | 0.533 ± 0.023 | 0.017 ± 0.009 |
+| No DP | ∞ | **0.861** | 0.045 | 0.497 |
+| DP (σ=0.5) | 8.80 | 0.538 | 0.618 | 0.736 |
+| DP (σ=1.5) | 0.47 | 0.538 | 0.566 | 0.680 |
 
-The larger model memorizes more aggressively (AUC 0.935 vs Qwen's 0.790), with TPR@1%FPR jumping from 0.157 to 0.525 — a 3x increase in the high-confidence attack regime. DP collapses the attack to chance under both noise settings.
+It does. A model that learns nothing still leaks membership at AUC 0.861. DP closes the leak.
 
-Reproduce: `python3 examples/canary_frontier.py --model mlx-community/Llama-3.2-1B-Instruct-bf16`
+`python3 examples/pubmedqa_dp.py`
 
-### Real-Data Validation (PubMedQA)
+### Summary
 
-To confirm leakage isn't an artifact of planted canaries, we repeated the MIA on PubMedQA — 500 real medical QA examples. The LoRA fine-tune does not learn the classification task at this scale (accuracy ≈ majority baseline), yet the model still leaks training-text membership:
+| Benchmark | non_dp MIA AUC | dp_mid MIA AUC | Utility Gap |
+|---|---|---|---|
+| Canary | 0.917 | 0.507 | — |
+| SST-2 (5 seeds) | 0.661 | 0.507 | 5.0 ± 2.8pp |
+| IMDB (3 seeds) | 0.926 | 0.500 | 0.6 ± 2.4pp |
+| PubMedQA | 0.861 | 0.538 | — |
 
-| Setting | ε (measured) | MIA AUC | Member Loss | Nonmember Loss |
-|---|---|---|---|---|
-| No DP | ∞ | **0.75–0.80** | 0.18 | 0.39 |
-| DP (σ=0.5) | 8.80 | 0.50–0.53 | 0.79 | 0.92 |
-| DP (σ=1.5) | 0.47 | 0.50–0.53 | 1.19 | 1.30 |
-
-Non-DP AUC range is across 2 seeds. DP collapses the attack to chance on real text just as on canaries. The key finding: **leakage and utility are decoupled** — a fine-tune that fails to generalize still leaks training membership at AUC 0.80, and DP closes that leak.
-
-### IMDB Sentiment Classification
-
-IMDB tests the case where the model actually learns. Qwen2.5-0.5B with LoRA (rank 16, all 7 linear keys) fine-tuned on 1500 IMDB reviews with full-sequence loss, forced-choice "Yes"/"No" evaluation. Mean ± std over 3 seeds.
-
-| Setting | ε (measured) | Accuracy | ROC-AUC | TPR @ 1% FPR |
-|---|---|---|---|---|
-| No DP | ∞ | **91.1 ± 0.5%** | **0.920 ± 0.006** | **0.154 ± 0.038** |
-| DP (σ=0.5) | 6.06 | 70.3 ± 14.7% | 0.499 ± 0.007 | 0.014 ± 0.006 |
-| DP (σ=1.5) | 0.31 | 60.2 ± 9.9% | 0.498 ± 0.007 | 0.011 ± 0.001 |
-
-Non-DP learns IMDB at 91% accuracy (vs 76% zero-shot) and memorizes at AUC 0.92. DP eliminates memorization completely — AUC collapses to 0.50 across all 6 DP runs (consistent with the MIA plateau observed by [Du et al. 2025](https://arxiv.org/abs/2504.21036), who found that even high ε substantially reduces MIA risk for LoRA). **DP accuracy is unreliable at this configuration**: per-seed DP-mid accuracy ranges from 53% to 89%. The privacy mechanism is robust; utility under DP at batch size 2 is not. The root cause is low per-step SNR — DP noise at σ=0.5 dominates gradient signal at B=2. Larger effective batch sizes via microbatched clipping are expected to fix this. See [Limitations](#limitations).
-
-Reproduce: `python3 examples/imdb_dp.py [--seed 42]`
-Reproduce: `python3 examples/canary_frontier.py` (canary) or `python3 examples/pubmedqa_dp.py` (PubMedQA).
-Multi-seed canary: `cd experiments/mia && python multi_seed.py --seeds 5`
-
-## Limitations
-
-- **DP utility at small batch size is high-variance.** IMDB DP accuracy ranges from 53% to 89% across seeds at batch size 2. Full-sequence loss (tested) did not resolve the variance; the root cause is low per-step SNR at B=2. Larger effective batch sizes via `clip_and_aggregate_microbatched` (already in the library, not yet wired into the training loop) are expected to fix this by improving SNR proportional to batch size. Pending v0.2.
-- Quantized base models are not supported (`QuantizedMatmul::vmap` is NYI in MLX).
-- Privacy accounting assumes Poisson subsampling; actual fixed-size sampling is slightly weaker (see [Privacy Accounting Caveat](#privacy-accounting-caveat)).
+These results are conservative. Post-fix per-sample gradient norms have median 2.34 and p90 29.8; the current clip `C=1.0` clips ~88% of samples. Raising the clip toward the median would recover utility without materially increasing privacy cost.
 
 ## Install
 
@@ -92,33 +95,27 @@ pip install -e ".[test]"  # + pytest, dp-accounting
 pip install -e ".[lora]"  # + mlx-lm for LoRA workflows
 ```
 
-## What This Supports (v0.1)
+## Scope
 
-- **LoRA fine-tuning** of decoder-only transformers on Apple Silicon via `mlx-lm`.
-- **Non-quantized** (bf16/fp16/fp32) base models with frozen weights and trainable LoRA adapters.
-- **Qwen and Llama** model families validated. Other GQA/MQA architectures with the standard `mlx-lm` attention pattern should work.
-- **Single-device** training only.
+**v0.1 supports:**
 
-## What This Does Not Support
+LoRA fine-tuning of decoder-only transformers on Apple Silicon via `mlx-lm`. Non-quantized (bf16/fp16/fp32) base models with frozen weights and trainable LoRA adapters. Qwen and Llama validated; other GQA/MQA architectures with the standard `mlx-lm` attention pattern should work. Single-device only.
 
-- Quantized base models (`QuantizedMatmul::vmap` is NYI in MLX).
-- Full fine-tuning (memory = O(B x total_params); use LoRA).
-- Ghost clipping or memory-efficient per-sample gradient approximations.
-- Stock `nn.Conv2d` with padding under `vmap(grad)`.
-- Cryptographically secure noise generation.
-- Multi-device / distributed training.
+**Not supported:**
 
-## Privacy Accounting Caveat
-
-The RDP accountant assumes **Poisson subsampling** (each example included independently with probability q = B/N). The actual data loader uses **fixed-size uniform sampling without replacement**, which provides slightly weaker amplification than Poisson. The reported ε is therefore **conservative** — actual privacy is at least as good as stated, but the bound is not tight. See Balle et al. 2018 for the distinction. This is a known limitation shared with most DP-SGD implementations including Opacus.
+Quantized base models (`QuantizedMatmul::vmap` is NYI in MLX). Full fine-tuning (memory = O(B × total_params); use LoRA). Ghost clipping or memory-efficient per-sample gradient approximations. Stock `nn.Conv2d` with padding under `vmap(grad)`. Cryptographically secure noise generation. Multi-device / distributed training.
 
 ## How It Works
 
-1. `make_private_loss` wraps your loss with `mx.vmap(mx.grad(...))`. Only trainable (unfrozen) parameters get gradients — no memory wasted on frozen base model weights.
+`make_private_loss` wraps your loss with `mx.vmap(mx.grad(...))`. Only trainable (unfrozen) parameters receive gradients — no memory spent on frozen base weights.
 
-2. For GQA models, the fused SDPA kernel is replaced with decomposed attention. MLX 0.31.1's `mx.fast.scaled_dot_product_attention` hangs or crashes under `vmap` when query and key/value head counts differ ([ml-explore/mlx#3383](https://github.com/ml-explore/mlx/issues/3383)). The fallback is selective: only GQA modules are patched, MHA stays on the fused path. ~1.45x attention overhead.
+For GQA models, the fused SDPA kernel is replaced with decomposed attention. MLX 0.31.1's `mx.fast.scaled_dot_product_attention` hangs under `vmap` when query and key/value head counts differ ([ml-explore/mlx#3383](https://github.com/ml-explore/mlx/issues/3383)). The fallback is selective: only GQA modules are patched; MHA stays on the fused path. ~1.45x attention overhead.
 
-3. `DPOptimizer.step()` clips each sample's gradient to L2 norm C, sums, adds N(0, σ²C²) noise, averages, and delegates to the base optimizer. The RDP accountant tracks ε automatically. When `compile=True` (the default), `mx.random.state` is captured as mutable compile state so Gaussian noise is resampled on every step — verified by a fast regression test (`test_compile_randomness.py`).
+`DPOptimizer.step()` clips each sample's gradient to L2 norm C, sums, adds N(0, σ²C²) noise, averages, and delegates to the base optimizer. The RDP accountant tracks ε automatically. With `compile=True` (default), `mx.random.state` is captured as mutable compile state so Gaussian noise is resampled every step — verified by `test_compile_randomness.py`.
+
+### Privacy Accounting
+
+The RDP accountant assumes Poisson subsampling (each example included independently with probability q = B/N). The actual data loader uses fixed-size uniform sampling without replacement, which provides slightly weaker amplification. Reported ε is therefore conservative — actual privacy is at least as good as stated, but the bound is not tight. See Balle et al. 2018 for the distinction. This matches the accounting in Opacus.
 
 ## API
 
@@ -130,7 +127,7 @@ The RDP accountant assumes **Poisson subsampling** (each example included indepe
 | `clip_and_aggregate(grads, C, σ)` | Per-sample clip + noise + aggregate |
 | `clip_and_aggregate_microbatched(...)` | Memory-efficient microbatched variant |
 | `check_model(model)` | Validate model compatibility |
-| `patch_model_for_dp(model)` | Explicit manual SDPA backend (usually automatic) |
+| `patch_model_for_dp(model)` | Explicit SDPA backend selection (usually automatic) |
 
 ## LoRA Example
 
@@ -149,9 +146,7 @@ linear_to_lora_layers(model, num_layers=4,
 
 def lm_loss(model, x, y):
     logits = model(x[None, :])
-    return nn.losses.cross_entropy(
-        logits[:, :-1, :].reshape(-1, logits.shape[-1]),
-        y[None, 1:].reshape(-1), reduction="mean")
+    return nn.losses.cross_entropy(logits[0], y, reduction="mean")
 
 dp_loss = make_private_loss(model, lm_loss)
 optimizer = DPOptimizer(Adam(learning_rate=1e-4), l2_norm_clip=1.0,
@@ -167,14 +162,14 @@ cd experiments/mia
 python demo.py --corpus my_writing.jsonl --noise-multiplier 1.0 --epochs 3
 ```
 
-Corpus format: one `{"text": "..."}` per line (JSONL). Not committed to the repo.
+Corpus format: one `{"text": "..."}` per line. Not committed to the repo.
 
 ## Tests
 
 ```bash
-pytest                   # fast unit tests (~22s, no data downloads)
-pytest -m mnist          # + MNIST integration tests (requires /tmp/mnist)
-pytest -m lora           # + LoRA integration test (downloads Qwen2.5-0.5B)
+pytest                   # unit tests (~22s, no downloads)
+pytest -m mnist          # + MNIST integration (requires /tmp/mnist)
+pytest -m lora           # + LoRA integration (downloads Qwen2.5-0.5B)
 ```
 
 ## License
