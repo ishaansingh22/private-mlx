@@ -6,7 +6,7 @@ from typing import Any
 import mlx.core as mx
 from mlx.utils import tree_flatten
 
-from .clip import clip_and_aggregate
+from .clip import clip_and_aggregate, clip_and_aggregate_microbatched
 from .accountant import RDPAccountant
 
 
@@ -83,6 +83,33 @@ class DPOptimizer:
         else:
             noisy = clip_and_aggregate(per_sample_grads, self.l2_norm_clip, self.noise_multiplier)
             self.base.update(model, noisy)
+
+        # Accountant runs outside compiled region (Python state mutation)
+        self.accountant.step(self.noise_multiplier, B / self.num_samples)
+
+    def step_microbatched(
+        self,
+        model,
+        per_sample_grad_fn,
+        batch_x: mx.array,
+        batch_y: mx.array,
+        microbatch_size: int,
+    ) -> None:
+        """Clip/noise/update with microbatched per-sample gradient evaluation."""
+        if self._compile:
+            raise ValueError("step_microbatched does not support compile=True.")
+
+        B = int(batch_x.shape[0])
+
+        noisy = clip_and_aggregate_microbatched(
+            per_sample_grad_fn,
+            batch_x,
+            batch_y,
+            self.l2_norm_clip,
+            self.noise_multiplier,
+            microbatch_size,
+        )
+        self.base.update(model, noisy)
 
         # Accountant runs outside compiled region (Python state mutation)
         self.accountant.step(self.noise_multiplier, B / self.num_samples)

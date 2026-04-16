@@ -10,6 +10,7 @@ from functools import partial
 import mlx.core as mx
 import mlx.nn as nn
 from mlx.optimizers import SGD
+from mlx.utils import tree_flatten
 
 from mlx_private import make_private_loss, DPOptimizer, clip_and_aggregate
 
@@ -171,3 +172,57 @@ class TestDPOptimizerCompileSmoke:
             )
 
         assert epsilons[-1] > 0
+
+    def test_microbatched_step_matches_materialized_no_noise(self):
+        """Microbatched DP step should match materialized step when σ=0."""
+        mx.random.seed(7)
+        model_full = TinyMLP()
+        mx.eval(model_full.parameters())
+        mx.random.seed(7)
+        model_micro = TinyMLP()
+        mx.eval(model_micro.parameters())
+
+        B = 8
+        x = mx.random.normal((B, 16))
+        y = mx.random.randint(0, 4, (B,))
+        mx.eval(x, y)
+
+        ps_fn_full = make_private_loss(model_full, _loss_fn)
+        ps_fn_micro = make_private_loss(model_micro, _loss_fn)
+        opt_full = DPOptimizer(
+            SGD(learning_rate=0.01),
+            l2_norm_clip=1.0,
+            noise_multiplier=0.0,
+            target_delta=1e-5,
+            num_samples=100,
+            compile=False,
+        )
+        opt_micro = DPOptimizer(
+            SGD(learning_rate=0.01),
+            l2_norm_clip=1.0,
+            noise_multiplier=0.0,
+            target_delta=1e-5,
+            num_samples=100,
+            compile=False,
+        )
+
+        for _ in range(5):
+            grads = ps_fn_full(x, y)
+            mx.eval(grads)
+            opt_full.step(model_full, grads)
+            opt_micro.step_microbatched(
+                model_micro,
+                ps_fn_micro,
+                x,
+                y,
+                microbatch_size=2,
+            )
+            mx.eval(model_full.parameters(), model_micro.parameters())
+
+        full_params = dict(tree_flatten(model_full.parameters()))
+        micro_params = dict(tree_flatten(model_micro.parameters()))
+        for key in full_params:
+            diff = mx.max(mx.abs(full_params[key] - micro_params[key])).item()
+            assert diff < 1e-6, f"Mismatch on {key}: max_diff={diff}"
+
+        assert opt_full.num_steps == opt_micro.num_steps == 5
