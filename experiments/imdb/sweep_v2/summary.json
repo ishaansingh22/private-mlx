@@ -1,0 +1,93 @@
+{
+  "config": {
+    "seeds": [42, 123, 456],
+    "seq_lens": [96, 128, 160],
+    "logical_batches": [8, 16],
+    "microbatches": [2],
+    "epochs": 2,
+    "n_train": 256,
+    "n_test": 256,
+    "mask_mode": "label"
+  },
+  "dp_candidates": [
+    {
+      "seq_len": 96,
+      "logical_batch": 8,
+      "microbatch": 2,
+      "accuracy_mean": 0.5794,
+      "accuracy_std": 0.0894,
+      "mia_auc_mean": 0.5186,
+      "epsilon_mean": 13.2510
+    },
+    {
+      "seq_len": 96,
+      "logical_batch": 16,
+      "microbatch": 2,
+      "accuracy_mean": 0.5599,
+      "accuracy_std": 0.0766,
+      "mia_auc_mean": 0.5210,
+      "epsilon_mean": 16.1608
+    },
+    {
+      "seq_len": 128,
+      "logical_batch": 8,
+      "microbatch": 2,
+      "accuracy_mean": 0.6028,
+      "accuracy_std": 0.1093,
+      "mia_auc_mean": 0.5055,
+      "epsilon_mean": 13.2510
+    },
+    {
+      "seq_len": 128,
+      "logical_batch": 16,
+      "microbatch": 2,
+      "accuracy_mean": 0.5846,
+      "accuracy_std": 0.0947,
+      "mia_auc_mean": 0.5088,
+      "epsilon_mean": 16.1608
+    },
+    {
+      "seq_len": 160,
+      "logical_batch": 8,
+      "microbatch": 2,
+      "accuracy_mean": 0.5872,
+      "accuracy_std": 0.0950,
+      "mia_auc_mean": 0.5290,
+      "epsilon_mean": 13.2510
+    },
+    {
+      "seq_len": 160,
+      "logical_batch": 16,
+      "microbatch": 2,
+      "accuracy_mean": 0.5677,
+      "accuracy_std": 0.0813,
+      "mia_auc_mean": 0.5201,
+      "epsilon_mean": 16.1608
+    }
+  ],
+  "dp_best": {
+    "seq_len": 128,
+    "logical_batch": 8,
+    "microbatch": 2,
+    "accuracy_mean": 0.6028,
+    "accuracy_std": 0.1093,
+    "mia_auc_mean": 0.5055,
+    "epsilon_mean": 13.2510
+  },
+  "non_dp_baseline": {
+    "seq_len": 128,
+    "logical_batch": 8,
+    "microbatch": 2,
+    "accuracy_mean": 0.6836,
+    "accuracy_std": 0.0345,
+    "mia_auc_mean": 0.5429
+  },
+  "decision": {
+    "status": "fallback_required",
+    "gap_pp": 8.08,
+    "stable": false,
+    "utility_ok": true,
+    "privacy_ok": true
+  },
+  "source": "Generated from examples/.cache/imdb_sweep_v2/summary.json"
+}

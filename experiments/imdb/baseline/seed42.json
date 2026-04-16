@@ -1,0 +1,45 @@
+{
+  "config": {
+    "seed": 42,
+    "epochs": 5,
+    "seq_len": 128,
+    "logical_batch_size": 8,
+    "microbatch_size": 2,
+    "max_review_tokens": 96,
+    "mask_mode": "label",
+    "n_train": 1500,
+    "n_test": 1500,
+    "settings": [
+      "non_dp",
+      "dp_mid"
+    ]
+  },
+  "results": [
+    {
+      "setting": "non_dp",
+      "epsilon": null,
+      "logical_batch_size": 8,
+      "microbatch_size": null,
+      "final_loss": 0.0542,
+      "elapsed_s": 463.9,
+      "accuracy": 0.7853,
+      "roc_auc": 0.8904,
+      "tpr@fpr=0.01": 0.2887,
+      "member_loss_mean": 0.0337,
+      "nonmember_loss_mean": 0.728
+    },
+    {
+      "setting": "dp_mid",
+      "epsilon": 9.720648079128079,
+      "logical_batch_size": 8,
+      "microbatch_size": 2,
+      "final_loss": 0.8114,
+      "elapsed_s": 1186.7,
+      "accuracy": 0.7553,
+      "roc_auc": 0.4967,
+      "tpr@fpr=0.01": 0.0093,
+      "member_loss_mean": 0.9593,
+      "nonmember_loss_mean": 0.9784
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+[
+  {
+    "setting": "non_dp",
+    "epsilon": null,
+    "final_loss": 0.0859,
+    "elapsed_s": 236.2,
+    "mia_auc": 0.8611,
+    "member_loss": 0.0449,
+    "nonmember_loss": 0.4971
+  },
+  {
+    "setting": "dp_mid",
+    "epsilon": 8.798686520660983,
+    "final_loss": 0.6071,
+    "elapsed_s": 583.6,
+    "mia_auc": 0.538,
+    "member_loss": 0.6183,
+    "nonmember_loss": 0.7364
+  },
+  {
+    "setting": "dp_strong",
+    "epsilon": 0.46633643590839724,
+    "final_loss": 0.5302,
+    "elapsed_s": 529.4,
+    "mia_auc": 0.538,
+    "member_loss": 0.5656,
+    "nonmember_loss": 0.6797
+  }
+]

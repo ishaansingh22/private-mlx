@@ -1,0 +1,35 @@
+[
+  {
+    "setting": "non_dp",
+    "epsilon": null,
+    "final_loss": 0.6138,
+    "elapsed_s": 33.1,
+    "roc_auc": 0.917,
+    "balanced_accuracy": 0.8425,
+    "tpr@fpr=0.01": 0.545,
+    "member_loss_mean": 0.5817,
+    "nonmember_loss_mean": 0.6732
+  },
+  {
+    "setting": "dp_mid",
+    "epsilon": 15.429799089974312,
+    "final_loss": 1.3666,
+    "elapsed_s": 82.7,
+    "roc_auc": 0.5068,
+    "balanced_accuracy": 0.525,
+    "tpr@fpr=0.01": 0.005,
+    "member_loss_mean": 1.3463,
+    "nonmember_loss_mean": 1.3527
+  },
+  {
+    "setting": "dp_strong",
+    "epsilon": 1.0784165232009708,
+    "final_loss": 3.469,
+    "elapsed_s": 77.4,
+    "roc_auc": 0.5137,
+    "balanced_accuracy": 0.535,
+    "tpr@fpr=0.01": 0.01,
+    "member_loss_mean": 2.9686,
+    "nonmember_loss_mean": 2.9753
+  }
+]
