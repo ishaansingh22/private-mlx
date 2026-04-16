@@ -1,6 +1,6 @@
 # mlx-private
 
-Per-sample DP-SGD for LoRA fine-tuning on Apple Silicon. All training runs on-device via MLX.
+Per-sample differentially private SGD (DP-SGD) for LoRA fine-tuning on Apple Silicon. All training runs on-device via MLX.
 
 ```python
 from mlx_private import make_private_loss, DPOptimizer
@@ -17,6 +17,18 @@ for batch_x, batch_y in dataloader:
 
 print(f"ε = {optimizer.epsilon:.2f}")
 ```
+
+## Why Differential Privacy?
+
+You fine-tune a model on private data (emails, medical notes, user messages) and then publish it or let people query it. The concern: **can someone learn facts about the training data just from the model's behavior?**
+
+**Membership inference** is the simplest version of this. An attacker is anyone who can run the model. They take a candidate text, feed it through, and check how well the model predicts it. Models assign each input a **loss**: lower means "the model fits this text surprisingly well," higher means "this text looks unfamiliar." If the model fits a text *too* well compared to similar texts it never trained on, that's a signal the text was in the training set. This is a **loss-threshold membership inference attack (MIA)**. Pick a cutoff, and everything below it gets flagged as "probably a training example."
+
+This works because small models in standard training tend to **memorize** parts of their training data, so training examples look unnaturally easy to the model, even when overall accuracy looks fine.
+
+**Differential privacy** is a training technique that limits how much any single example can influence the final model. Each gradient update is clipped per-sample and noised so no individual row leaves a strong fingerprint in the weights. The privacy budget **ε** (epsilon) quantifies the guarantee: lower ε means stronger privacy. The trade-off is some accuracy loss, which the results below measure.
+
+**MIA AUC** (area under the ROC curve) measures how well the attacker separates members from non-members across all thresholds. 0.5 is random guessing, 1.0 is perfect detection. The goal of DP training is to push MIA AUC toward 0.5 while keeping task accuracy as high as possible.
 
 ## Membership Inference Results
 
