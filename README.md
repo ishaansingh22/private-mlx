@@ -34,6 +34,8 @@ This works because small models in standard training tend to **memorize** parts 
 
 Trained Qwen2.5-0.5B LoRA adapters across four benchmarks and ran loss-threshold membership inference attacks against each. The question throughout: can an attacker distinguish training examples from held-out examples by their loss?
 
+![MIA AUC across benchmarks, with and without DP](docs/figures/mia_summary.png)
+
 ### Canary Frontier
 
 Synthetic corpus, 200 training examples with unique 8-character codes. Seed 42.
