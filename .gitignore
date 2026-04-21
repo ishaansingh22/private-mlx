@@ -8,7 +8,8 @@ build/
 
 # Internal planning / exploration
 north-star.md
-docs/
+docs/*
+!docs/figures/
 phase0/
 
 # Generated experiment artifacts (scripts are committed, outputs are not)
